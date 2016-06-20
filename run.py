@@ -10,7 +10,9 @@ import argparse
 import logging
 import time
 import signal
+import sys
 
+from contextlib import contextmanager
 from urllib import unquote
 from operator import methodcaller
 
@@ -23,6 +25,26 @@ parser.add_argument("--dry-run", dest='dry_run', default=False, action='store_tr
 parser.add_argument("url", nargs="*")
 
 args = parser.parse_args()
+
+class Stats(object):
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.skipped = 0
+        self.completed = 0
+
+    def skip(self):
+        with self.update():
+            self.skipped += 1
+
+    def complete(self):
+        with self.update():
+            self.completed += 1
+
+    @contextmanager
+    def update(self):
+        self.lock.acquire()
+        yield
+        self.lock.release()
 
 class helper(object):
     lock = threading.RLock()
@@ -57,7 +79,7 @@ class helper(object):
                 os.makedirs(target)
         
     @staticmethod
-    def runloop(kill, queue):
+    def runloop(kill, queue, stats):
         try:
             while not kill.is_set():
                 item = queue.get_nowait()
@@ -75,15 +97,41 @@ class helper(object):
                             for chunk in src.iter_content(1024 * 10):
                                 f.write(chunk)
                             src.close()
+                        stats.complete()
+                    else:
+                        stats.skip()
 
         except Queue.Empty:
             log.info("Queue empty, exiting thread")
 
     @staticmethod
-    def statusloop(kill, queue):
+    def statusloop(kill, queue, stats):
+        def format(elap):
+            elap = int(elap)
+
+            h = elap / 3600
+            m = (elap % 3600) / 60
+            s = elap % 60
+
+            return "%02dh%02dm%02ds" % (h, m, s)
+
+        def estimate(rem, elap):
+            c = stats.completed
+            per = c / elap
+
+            ttc = rem * per
+
+            return format(ttc)
+            
+
+        ts = time.time()
         while not queue.empty() and not kill.is_set():
-            log.info("%s items remaining", queue.qsize())
-            time.sleep(5)
+            rem = queue.qsize()
+            elap = time.time() - ts
+
+            sys.stdout.write("\rS:%s C:%s R:%s (elap %s, rem %s)" % (stats.skipped, stats.completed, rem, format(elap), estimate(rem, elap)))
+            sys.stdout.flush()
+            time.sleep(1)
 
 
 class Runner(object):
@@ -130,13 +178,14 @@ class Runner(object):
         """
         queue = Queue.Queue()
         event = threading.Event()
+        stats = Stats()
         map(queue.put, links)
 
         threads = []
         for i in range(5):
-            threads.append(threading.Thread(name="thread-%02d"%(i), target=helper.runloop, args=[event, queue]))
+            threads.append(threading.Thread(name="thread-%02d"%(i), target=helper.runloop, args=[event, queue, stats]))
 
-        threads.append(threading.Thread(name="status", target=helper.statusloop, args=[event, queue]))
+        threads.append(threading.Thread(name="status", target=helper.statusloop, args=[event, queue, stats]))
 
         def killthreads(*args):
             print "Exiting"

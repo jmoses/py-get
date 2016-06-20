@@ -9,6 +9,7 @@ import requests
 import argparse
 import logging
 import time
+import signal
 
 from urllib import unquote
 from operator import methodcaller
@@ -56,9 +57,9 @@ class helper(object):
                 os.makedirs(target)
         
     @staticmethod
-    def runloop(queue):
+    def runloop(kill, queue):
         try:
-            while True:
+            while not kill.is_set():
                 item = queue.get_nowait()
                 local_target = helper.target_from_uri(item)
 
@@ -79,8 +80,8 @@ class helper(object):
             log.info("Queue empty, exiting thread")
 
     @staticmethod
-    def statusloop(queue):
-        while not queue.empty():
+    def statusloop(kill, queue):
+        while not queue.empty() and not kill.is_set():
             log.info("%s items remaining", queue.qsize())
             time.sleep(5)
 
@@ -97,7 +98,7 @@ class Runner(object):
         leaves = leaves if leaves is not None else set()
 
         if helper.is_dir(uri):
-            log.debug("Descending into %s", uri)
+            log.info("Descending into %s", uri)
             for link in self.get_index(uri):
                 self.fetch_leaves(link, leaves)
         else:
@@ -128,22 +129,31 @@ class Runner(object):
         Fetch all the supplied links
         """
         queue = Queue.Queue()
+        event = threading.Event()
         map(queue.put, links)
 
         threads = []
         for i in range(5):
-            threads.append(threading.Thread(name="thread-%02d"%(i), target=helper.runloop, args=[queue]))
+            threads.append(threading.Thread(name="thread-%02d"%(i), target=helper.runloop, args=[event, queue]))
 
-        threads.append(threading.Thread(name="status", target=helper.statusloop, args=[queue]))
+        threads.append(threading.Thread(name="status", target=helper.statusloop, args=[event, queue]))
+
+        def killthreads(*args):
+            print "Exiting"
+            event.set()
+
+        signal.signal(signal.SIGINT, killthreads)
 
         log.info("Starting threads")
         map(methodcaller('start'), threads)
-        map(methodcaller('join'), threads)
+
+        while any(map(lambda x: x.isAlive(), threads)):
+            map(methodcaller('join', 15), threads)
 
 r = Runner()
 
 for u in args.url:
     print u
     links = r.fetch_leaves(u)
-    log.info("Found %s links", len(links))
+    log.info("Found %s links for %s", len(links), u)
     r.fetch_all(links)

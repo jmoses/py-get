@@ -8,13 +8,14 @@ import urlparse
 import requests
 import argparse
 import logging
+import time
 
 from urllib import unquote
 from operator import methodcaller
 
 logging.basicConfig()
 log = logging.getLogger("py-get")
-log.setLevel(logging.DEBUG)
+log.setLevel(logging.INFO)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dry-run", dest='dry_run', default=False, action='store_true')
@@ -67,7 +68,7 @@ class helper(object):
                     helper.make_path(local_target)
 
                     if not os.path.exists(local_target):
-                        log.info("Retrieving %s", item)
+                        log.debug("Retrieving %s", item)
                         with open(local_target, 'wb') as f:
                             src = requests.get(item, stream=True)
                             for chunk in src.iter_content(1024 * 10):
@@ -76,6 +77,13 @@ class helper(object):
 
         except Queue.Empty:
             log.info("Queue empty, exiting thread")
+
+    @staticmethod
+    def statusloop(queue):
+        while not queue.empty():
+            log.info("%s items remaining", queue.qsize())
+            time.sleep(5)
+
 
 class Runner(object):
     def __init__(self):
@@ -125,6 +133,8 @@ class Runner(object):
         threads = []
         for i in range(5):
             threads.append(threading.Thread(name="thread-%02d"%(i), target=helper.runloop, args=[queue]))
+
+        threads.append(threading.Thread(name="status", target=helper.statusloop, args=[queue]))
 
         log.info("Starting threads")
         map(methodcaller('start'), threads)

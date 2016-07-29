@@ -22,6 +22,7 @@ log.setLevel(logging.INFO)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dry-run", dest='dry_run', default=False, action='store_true')
+parser.add_argument("--file", dest='file', default=None)
 parser.add_argument("url", nargs="*")
 
 args = parser.parse_args()
@@ -200,8 +201,13 @@ class Runner(object):
             map(methodcaller('join', 15), threads)
 
 r = Runner()
+urls = args.url
 
-for u in args.url:
+if args.file:
+    with open(args.file, 'r') as contents:
+        urls.extend(contents.read().split("\n"))
+
+for u in urls:
     print u
     links = r.fetch_leaves(u)
     log.info("Found %s links for %s", len(links), u)

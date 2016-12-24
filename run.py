@@ -22,10 +22,15 @@ log.setLevel(logging.INFO)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dry-run", dest='dry_run', default=False, action='store_true')
+parser.add_argument("--debug", dest="debug", default=False, action='store_true')
 parser.add_argument("--file", dest='file', default=None)
+parser.add_argument("--exclude-pattern", dest='exclude_pattern', default=None)
 parser.add_argument("url", nargs="*")
 
 args = parser.parse_args()
+
+if args.debug:
+    log.setLevel(logging.DEBUG)
 
 class Stats(object):
     def __init__(self):
@@ -93,11 +98,23 @@ class helper(object):
 
                     if not os.path.exists(local_target):
                         log.debug("Retrieving %s", item)
+                        aborted = False
                         with open(local_target, 'wb') as f:
                             src = requests.get(item, stream=True)
                             for chunk in src.iter_content(1024 * 10):
+                                if kill.is_set():
+                                    aborted = True
+                                    log.info("Exiting mid-download due to request")
+                                    break
+
                                 f.write(chunk)
+
                             src.close()
+
+                        if aborted:
+                           os.remove(local_target)
+                           return
+
                         stats.complete()
                     else:
                         stats.skip()
@@ -136,7 +153,8 @@ class helper(object):
 
 
 class Runner(object):
-    def __init__(self):
+    def __init__(self, args):
+        self.args = args
         pass
 
     def fetch_leaves(self, uri, leaves=None):
@@ -152,9 +170,18 @@ class Runner(object):
                 self.fetch_leaves(link, leaves)
         else:
             log.debug("Found leaf %s", uri)
-            leaves.add(uri)
+            if not self.ignore_leaf(uri):
+                leaves.add(uri)
+            else:
+                log.debug("Ignored %s", uri)
 
         return leaves
+
+    def ignore_leaf(self, url):
+        if self.args.exclude_pattern:
+            return re.search(self.args.exclude_pattern, url) 
+        else:
+            return False
 
     def get_index(self, uri):
         """
@@ -198,9 +225,9 @@ class Runner(object):
         map(methodcaller('start'), threads)
 
         while any(map(lambda x: x.isAlive(), threads)):
-            map(methodcaller('join', 15), threads)
+            map(methodcaller('join', 1), threads)
 
-r = Runner()
+r = Runner(args)
 urls = args.url
 
 if args.file:

@@ -99,21 +99,26 @@ class helper(object):
                     if not os.path.exists(local_target):
                         log.debug("Retrieving %s", item)
                         aborted = False
-                        with open(local_target, 'wb') as f:
-                            src = requests.get(item, stream=True)
-                            for chunk in src.iter_content(1024 * 10):
-                                if kill.is_set():
-                                    aborted = True
-                                    log.info("Exiting mid-download due to request")
-                                    break
+                        try:
+                            with open(local_target, 'wb') as f:
+                                src = requests.get(item, stream=True)
+                                for chunk in src.iter_content(1024 * 10):
+                                    if kill.is_set():
+                                        aborted = True
+                                        log.info("Exiting mid-download due to request")
+                                        break
 
-                                f.write(chunk)
+                                    f.write(chunk)
 
-                            src.close()
+                                src.close()
+                        except Exception, e:
+                            log.warn("Failed downloading {}: {}".format(item, e))
+                            aborted = True
 
                         if aborted:
-                           os.remove(local_target)
-                           return
+                            if os.path.exists(local_target):
+                                os.remove(local_target)
+                                return
 
                         stats.complete()
                     else:
@@ -188,7 +193,14 @@ class Runner(object):
         Gets and parses the index of a dir
         """
         link_pattern = r"href=[\"']{1}(.*?)[\"']{1}"
-        response = requests.get(uri)
+        try:
+            response = requests.get(uri)
+        except Exception, e:
+            log.warn("Failed to get {}: {}".format(uri, e))
+            with open('failed.log', 'wb') as out:
+                out.write(uri + "\n")
+
+            return set()
 
         links = set()
         for link in re.finditer(link_pattern, response.text, re.I):

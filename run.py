@@ -25,6 +25,8 @@ parser.add_argument("--dry-run", dest='dry_run', default=False, action='store_tr
 parser.add_argument("--debug", dest="debug", default=False, action='store_true')
 parser.add_argument("--file", dest='file', default=None)
 parser.add_argument("--exclude-pattern", dest='exclude_pattern', default=None)
+parser.add_argument("--only-download", dest="only_download", action='store_true')
+parser.add_argument("--debug", dest="debug", action="store_true")
 parser.add_argument("url", nargs="*")
 
 args = parser.parse_args()
@@ -160,7 +162,6 @@ class helper(object):
 class Runner(object):
     def __init__(self, args):
         self.args = args
-        pass
 
     def fetch_leaves(self, uri, leaves=None):
         """
@@ -244,10 +245,17 @@ urls = args.url
 
 if args.file:
     with open(args.file, 'r') as contents:
-        urls.extend(contents.read().split("\n"))
+        urls.extend(map(methodcaller("strip"), contents.read().split("\n")))
+    urls = filter(bool, urls)
 
-for u in urls:
-    print u
-    links = r.fetch_leaves(u)
-    log.info("Found %s links for %s", len(links), u)
-    r.fetch_all(links)
+if args.only_download:
+    r.fetch_all(urls)
+else:
+    for u in urls:
+        print u
+        links = r.fetch_leaves(u)
+
+        # TODO SHould cache here or in the leaves method
+
+        log.info("Found %s links for %s", len(links), u)
+        r.fetch_all(links)

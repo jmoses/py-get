@@ -11,6 +11,7 @@ import logging
 import time
 import signal
 import sys
+import json
 
 from contextlib import contextmanager
 from urllib import unquote
@@ -22,17 +23,26 @@ log.setLevel(logging.INFO)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dry-run", dest='dry_run', default=False, action='store_true')
-parser.add_argument("--debug", dest="debug", default=False, action='store_true')
 parser.add_argument("--file", dest='file', default=None)
 parser.add_argument("--exclude-pattern", dest='exclude_pattern', default=None)
 parser.add_argument("--only-download", dest="only_download", action='store_true')
 parser.add_argument("--debug", dest="debug", action="store_true")
+parser.add_argument("--resume", dest="resume", action="store_true")
 parser.add_argument("url", nargs="*")
 
 args = parser.parse_args()
 
 if args.debug:
     log.setLevel(logging.DEBUG)
+
+persist_file = "state.json"
+def persist(links):
+    with open(persist_file, 'wb') as out:
+        json.dump(list(links), out)
+
+def restore():
+    with open(persist_file ,'r') as inp:
+        return set(json.load(inp))
 
 class Stats(object):
     def __init__(self):
@@ -248,7 +258,12 @@ if args.file:
         urls.extend(map(methodcaller("strip"), contents.read().split("\n")))
     urls = filter(bool, urls)
 
-if args.only_download:
+if args.resume:
+    # This will only restore the site that was currently being processed, not
+    # the state of the list
+    urls = restore()
+    r.fetch_all(urls)
+elif args.only_download:
     r.fetch_all(urls)
 else:
     for u in urls:
@@ -258,4 +273,5 @@ else:
         # TODO SHould cache here or in the leaves method
 
         log.info("Found %s links for %s", len(links), u)
+        persist(links)
         r.fetch_all(links)

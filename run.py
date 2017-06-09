@@ -113,7 +113,7 @@ class helper(object):
                         aborted = False
                         try:
                             with open(local_target, 'wb') as f:
-                                src = requests.get(item, stream=True)
+                                src = requests.get(item, timeout=15, stream=True)
                                 for chunk in src.iter_content(1024 * 10):
                                     if kill.is_set():
                                         aborted = True
